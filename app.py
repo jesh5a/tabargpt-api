@@ -1,32 +1,46 @@
-import os
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+from flask import Flask, request, jsonify
+import time
 
+# ================= FLASK APP =================
 app = Flask(__name__)
 
-# Allow ONLY your frontend site to call this API
-CORS(app, resources={
-    r"/*": {"origins": ["https://tabargpt.com", "https://www.tabargpt.com"]}
-})
+# ================= STORAGE =================
+visit_logs = []
 
-API_TOKEN = os.environ.get("API_TOKEN", "")
+# ================= HELPERS =================
+def get_client_ip(req):
+    # 1) Cloudflare real visitor IP
+    cf_ip = req.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
 
-def require_token():
-    # Simple token check (prevents random public abuse)
-    if not API_TOKEN:
-        return None  # if you forgot to set it, don't block you during testing
-    provided = request.headers.get("X-API-KEY", "")
-    if provided != API_TOKEN:
-        return jsonify({"error": "Unauthorized"}), 401
-    return None
+    # 2) Proxy chain
+    xff = req.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
 
-@app.get("/health")
-def health():
-    return jsonify(status="ok")
+    # 3) Fallback
+    return req.remote_addr
 
-@app.get("/hello")
-def hello():
-    maybe = require_token()
-    if maybe:
-        return maybe
-    return jsonify(message="Hello from api.tabargpt.com")
+# ================= ROUTES =================
+@app.route("/api/visit", methods=["GET", "POST"])
+def api_visit():
+    ip = get_client_ip(request)
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    entry = {
+        "ip": ip,
+        "time": timestamp,
+        "ua": request.headers.get("User-Agent", ""),
+        "ref": request.headers.get("Referer", ""),
+    }
+
+    visit_logs.append(entry)
+
+    print(
+        f"[VISIT] IP={ip} TIME={timestamp} "
+        f"UA={entry['ua']} REF={entry['ref']}",
+        flush=True
+    )
+
+    return jsonify({"status": "ok"}), 200
